@@ -71,3 +71,22 @@ tags:
 
 ### 2.5 Chunk Size
 
+>GFS chunk size 是64MB，普遍大于其他文件系统，每个chunk replica都以linux file的形式存储，并且按需扩展size
+
+**较大chunk size的缺点**
+
+1. 容易出现内部碎片，这个问题通过Lazy space allocation策略解决(后续追加扩展文件)。
+2. 一些文件只有少许或者一个chunk，遇到多个clients的频繁访问会形成hot spots问题，目前的解决方案是将热点文件复制到更多机器上分担访问流量。
+
+**较大chunk size的优点**
+
+1. 减少clients和master交互的需要
+2. client更可能在同一个chunk上执行更多操作，通过保持一个tcp链接减少网络负担
+3. 减少了需要保存在master上的元数据
+
+### 2.6 metadata
+
+
+
+
+
