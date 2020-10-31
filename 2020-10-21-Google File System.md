@@ -86,7 +86,44 @@ tags:
 
 ### 2.6 metadata
 
+> master存放元数据的三种主要类型：文件和chunk命名空间；文件到chunks的映射；每个chunk拷贝的位置。所有元数据都在master的内存里。前两种类型记录变化到存储在master本地磁盘和远程机器拷贝的操作日志上。使用日志让我们更新master状态更加简单、可靠并且没有了在master崩溃时候不一致的风险。master不会持续的保存chunk本地信息，相反，它会在master启动和每当有chunkserver加入集群时询问每个chunkserver他们的chunks信息。
+
+#### 2.6.1 In-Memory Data Structures
+
+* 元数据存储在内存中，master的操作会很快。这样master可以很轻松有效的在后台扫描全局状态，周期性的扫描是为了实现chunk垃圾回收机制以及在chunkserver故障时重新复制信息，进行chunk迁移平衡工作负担和硬盘空间。
+* 潜在的问题是系统被有多少内存所限制。但是这个实际上不是很严重的限制，因为对于每个64MB的chunk只需要小于64字节的元数据，大部分chunk都是满的，同样的命名空间数据也是这样
+
+#### 2.6.2 Chunk Locations
+
+master节点是不存储一个包含chunk在哪个chunkservers的持久化记录的，一开始设计master节点持久化存储所有chunk location信息，但是chunk属于chunkserver，一旦chunkserver发生故障或者下线很难保持信息的一致性。现有的方案是在master启动时获取chunk信息，通过心跳监控chunkserver状态周期性的获取信息。
+
+### 2.6.3 Operation Log
+
+* 操作日志包含元数据变化的历史记录，是GFS的核心。不仅因为它有元数据的持久性记录，它为现有的操作提供了一个逻辑时间线。文件和chunks以及他们的versions，被独一无二的永久的在它们创建时就被逻辑时间标识。
+* 我们只在本地和远程将对应日志文件记录刷新到磁盘之后才响应对应的客户操作，master在刷新之前批量处理几个日志记录减少对整个系统的影响
+* master通过重播操作日志恢复文件系统，为了最小化启动时间，我们必须使得日志很小。master每当操作日志增长一定的大小就要设置检查点状态这样可以确保加载最近的检查点只需要对一部分日志记录重播。检查点的结构是复杂的compat-B树的结构。
+* 因为建立检查点需要一些时间，因此是在子进程进行创建的，不影响日志的其他操作
+* 恢复数据只需要找到最后的一个检查点和接下来的日志文件
+
+### 2.7 Consistency Model
+
+> 这部分讨论GFS的保证和它们对于应用的意义
+
+#### 2.7.1 Guarantees by GFS
+
+* 文件名称空间的操作是原子性的，它们被master专门处理，通过名称空间锁保证原子性和正确性
+* 文件区状态取决于mutation的类型，下表总结了结果。consistent表示所有的客户可以看到同样的数据，无论它们读的是哪里的副本，defined是在consistent的基础上最后一次成功的执行可以完整的读到。
+* 数据变更可能是写操作或者追加记录操作引起的
+* 在一段无序的mutation操作之后，GFS靠两个机制保证状态到达defined
+  1. 对于一个chunk的mutations操作按照同样的顺序在它的所有副本上执行
+  2. 使用chunk版本号检测是否有过期的副本(错过了mutation操作的副本)
 
 
+* 容错机制
+  1. 规律的handshakes检测崩溃的chunkservers
+  2. checksum检测损坏数据，一旦检测到损坏会尽快从其他合法副本恢复过来
 
+![image-20201030210413901](../dreamStarRiver.github.io/img/image-20201030210413901.png)
+
+#### 2.7.2 Implications for Applications
 
